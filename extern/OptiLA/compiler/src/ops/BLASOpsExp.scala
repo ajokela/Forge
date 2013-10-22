@@ -14,6 +14,7 @@ import ppl.delite.framework.Util._
 import ppl.delite.framework.Config
 import ppl.delite.framework.extern.codegen.scala.ScalaGenExternalBase
 import ppl.delite.framework.extern.codegen.cuda.CudaGenExternalBase
+import ppl.delite.framework.extern.codegen.cpp.CGenExternalBase
 import ppl.delite.framework.extern.lib.MKL
 import ppl.delite.framework.extern.lib.cuBLAS
 
@@ -127,14 +128,66 @@ trait CudaGenBLASOps extends CudaGenExternalBase {
   %1$s(transpose, mat_col, mat_row, 1.0, mat1, mat_col, vec2, 1, 0.0, vec3, 1);
 }""".format(func))
 
-
     case _ => super.emitExternalLib(rhs)
   }
 
 }
 
-trait OpenCLGenBLASOps
-trait CGenBLASOps
+trait OpenCLGenBLASOps // todo: implement 
+
+trait CGenBLASOps extends CGenExternalBase {
+  val IR: BLASOpsExp with OptiLAExp
+  import IR._
+
+  override def emitExternalNode(sym: Sym[Any], rhs: Def[Any]) = rhs match {
+    case e@Native_matMult(xR,xC,x,yR,yC,y) =>
+      val args = scala.List("%1$s->data", "%2$s->data", "%3$s->data", "%4$s", "%5$s", "%6$s")
+                 .map { _.format(quote(x), quote(y), quote(sym), quote(xR), quote(xC), quote(yC)) }
+      emitMethodCall(sym, e, MKL, args)
+
+    case e@Native_matTimesVec(xR,xC,x,y) =>
+      val args = scala.List("%1$s->data", "%2$s->data", "%3$s->data", "%4$s", "%5$s", "0", "1")
+                 .map { _.format(quote(x), quote(y), quote(sym), quote(xR), quote(xC)) }
+      emitMethodCall(sym, e, MKL, args)
+
+    case _ => super.emitExternalNode(sym, rhs)
+  }
+
+  override def emitExternalLib(rhs: Def[Any]): Unit = rhs match {
+    case e@Native_matMult(xR,xC,x,yR,yC,y) =>
+      val tp = remap(e._mT)
+      val func = tp match {
+        case "double" => "cblas_dgemm"
+        case "float" => "cblas_sgemm"
+      }
+      emitInterfaceAndMethod(MKL, e.funcName,
+        scala.List("%1$s *mat1_ptr", "%1$s *mat2_ptr", "%1$s *mat3_ptr", "int mat1_r", "int mat1_c", "int mat2_c") map { _.format(tp) },
+        "",
+        """
+        {
+          %2$s(CblasRowMajor, CblasNoTrans, CblasNoTrans, mat1_r, mat2_c, mat1_c, 1.0, mat1_ptr, mat1_c, mat2_ptr, mat2_c, 0.0, mat3_ptr, mat2_c);
+        }""".format(tp.toLowerCase, func))
+
+    case e@Native_matTimesVec(xR,xC,x,y) =>
+      val tp = remap(e._mT)
+      val func = tp match {
+        case "double" => "cblas_dgemv"
+        case "float" => "cblas_sgemv"
+      }
+      emitInterfaceAndMethod(MKL, e.funcName,
+        scala.List("%1$s *mat1_ptr", "%1$s *vec2_ptr", "%1$s *vec3_ptr", "int mat_row", "int mat_col", "int vec_offset", "int vec_stride") map { _.format(tp) },
+        "",
+        """
+        {
+          vec2_ptr += vec_offset;
+
+          %2$s(CblasRowMajor, CblasNoTrans, mat_row, mat_col, 1.0, mat1_ptr, mat_col, vec2_ptr, vec_stride, 0.0, vec3_ptr, 1);
+        }""".format(tp.toLowerCase, func))
+
+    case _ => super.emitExternalLib(rhs)
+  }
+
+}
 
 trait ScalaGenBLASOps extends ScalaGenExternalBase {
   val IR: BLASOpsExp with OptiLAExp
@@ -177,15 +230,15 @@ trait ScalaGenBLASOps extends ScalaGenExternalBase {
         """
         {
           jboolean copy;
-          j%1$s *mat1_ptr = (*env)->GetPrimitiveArrayCritical(env, (jarray)mat1, &copy);
-          j%1$s *mat2_ptr = (*env)->GetPrimitiveArrayCritical(env, (jarray)mat2, &copy);
-          j%1$s *mat3_ptr = (*env)->GetPrimitiveArrayCritical(env, (jarray)mat3, &copy);
+          j%1$s *mat1_ptr = (j%1$s*)(env->GetPrimitiveArrayCritical((jarray)mat1, &copy));
+          j%1$s *mat2_ptr = (j%1$s*)(env->GetPrimitiveArrayCritical((jarray)mat2, &copy));
+          j%1$s *mat3_ptr = (j%1$s*)(env->GetPrimitiveArrayCritical((jarray)mat3, &copy));
 
           %2$s(CblasRowMajor, CblasNoTrans, CblasNoTrans, mat1_r, mat2_c, mat1_c, 1.0, mat1_ptr, mat1_c, mat2_ptr, mat2_c, 0.0, mat3_ptr, mat2_c);
 
-          (*env)->ReleasePrimitiveArrayCritical(env, mat1, mat1_ptr, 0);
-          (*env)->ReleasePrimitiveArrayCritical(env, mat2, mat2_ptr, 0);
-          (*env)->ReleasePrimitiveArrayCritical(env, mat3, mat3_ptr, 0);
+          env->ReleasePrimitiveArrayCritical(mat1, mat1_ptr, 0);
+          env->ReleasePrimitiveArrayCritical(mat2, mat2_ptr, 0);
+          env->ReleasePrimitiveArrayCritical(mat3, mat3_ptr, 0);
         }""".format(tp.toLowerCase, func))
 
 
@@ -202,20 +255,19 @@ trait ScalaGenBLASOps extends ScalaGenExternalBase {
         {
           jboolean copy;
 
-          j%1$s *mat1_ptr = (j%1$s*)((*env)->GetPrimitiveArrayCritical(env, (jarray)mat1, &copy));
-          j%1$s *vec2_ptr = (j%1$s*)((*env)->GetPrimitiveArrayCritical(env, (jarray)vec2, &copy));
-          j%1$s *vec3_ptr = (j%1$s*)((*env)->GetPrimitiveArrayCritical(env, (jarray)vec3, &copy));
+          j%1$s *mat1_ptr = (j%1$s*)(env->GetPrimitiveArrayCritical((jarray)mat1, &copy));
+          j%1$s *vec2_ptr = (j%1$s*)(env->GetPrimitiveArrayCritical((jarray)vec2, &copy));
+          j%1$s *vec3_ptr = (j%1$s*)(env->GetPrimitiveArrayCritical((jarray)vec3, &copy));
 
           vec2_ptr += vec_offset;
 
           %2$s(CblasRowMajor, CblasNoTrans, mat_row, mat_col, 1.0, mat1_ptr, mat_col, vec2_ptr, vec_stride, 0.0, vec3_ptr, 1);
 
-          (*env)->ReleasePrimitiveArrayCritical(env, mat1, mat1_ptr, 0);
-          (*env)->ReleasePrimitiveArrayCritical(env, vec2, vec2_ptr, 0);
-          (*env)->ReleasePrimitiveArrayCritical(env, vec3, vec3_ptr, 0);
+          env->ReleasePrimitiveArrayCritical(mat1, mat1_ptr, 0);
+          env->ReleasePrimitiveArrayCritical(vec2, vec2_ptr, 0);
+          env->ReleasePrimitiveArrayCritical(vec3, vec3_ptr, 0);
         }""".format(tp.toLowerCase, func))
 
     case _ => super.emitExternalLib(rhs)
   }
 }
-

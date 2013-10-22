@@ -270,7 +270,11 @@ trait DeliteGenOps extends BaseGenOps {
           }
           stream.println()
           stream.println("    val in = " + col.name)
-          stream.println("    def func = " + makeOpImplMethodNameWithArgs(o, "_map"))
+          //todo: better to modify DeliteOp to have common name?
+          if (mapreduce.cond.isDefined)
+            stream.println("    def func = " + makeOpImplMethodNameWithArgs(o, "_map"))
+          else
+            stream.println("    def map = " + makeOpImplMethodNameWithArgs(o, "_map"))
           stream.println("    def zero = " + makeOpImplMethodNameWithArgs(o, "_zero"))
           stream.println("    def reduce = " + makeOpImplMethodNameWithArgs(o, "_reduce"))
           if (mapreduce.cond.isDefined) {
