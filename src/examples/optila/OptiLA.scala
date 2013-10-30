@@ -98,6 +98,10 @@ a1+b1
     // native libs
     extern(grp("BLAS"))
     extern(grp("LAPACK"))
+
+    // rewrite rules
+    extern(grp("Rewrite"))
+
   }
 
   def importVecMatConstructor() {
