@@ -57,5 +57,5 @@ trait TestBFS extends OptiGraphApplication {
     */ 
   }
 def fromLine(line: Rep[String]): Rep[Int] = {line.toInt}
-def nodeComputation(node: Rep[Node], nd: Rep[NodeData[Int]]) : Rep[Int] = {nd(node())+5}
+def nodeComputation(node: Rep[Node], nd: Rep[NodeData[Int]], lvl: Rep[GraphCollection[Int]]) : Rep[Int] = {nd(node())+5}
 }
