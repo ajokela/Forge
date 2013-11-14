@@ -1,5 +1,5 @@
 package ppl.dsl.forge
-package examples
+package dsls
 package optila
 
 import core.{ForgeApplication,ForgeApplicationRunner,Config}
@@ -36,6 +36,8 @@ trait DenseVectorViewOps {
       infix ("Clone") (Nil :: DenseVector(T)) implements redirect ${ $self.toDense }
 
       infix ("toDense") (Nil :: DenseVector(T)) implements composite ${ $self.map(e => e) }
+
+      direct ("__equal") (DenseVector(T) :: MBoolean) implements composite ${ $1 == $self }
 
       fimplicit ("viewToDense") (Nil :: DenseVector(T)) implements composite ${
         if (Settings.verbose > 0) println("(performance warning): automatic conversion from DenseVectorView to DenseVector")
